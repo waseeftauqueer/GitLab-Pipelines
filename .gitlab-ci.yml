@@ -1,0 +1,58 @@
+stages:
+  - build
+  - test
+  - deploy
+  - deploy_staging
+  - deploy_production
+
+variables:
+  APP_VERSION: $CI_PIPELINE_IID
+
+build_website:
+  image: node:16-alpine
+  stage: build
+  script:
+    - |
+      yarn install
+      yarn lint
+      yarn test
+      yarn build
+      echo "App Version: $APP_VERSION" > build/version.html
+  artifacts:
+    paths:
+      - build
+
+test_website:
+  image: node:16-alpine
+  stage: test
+  script:
+    - yarn global add serve
+    - apk add curl
+    - serve -s build &
+    - sleep 10
+    - curl http://localhost:3000 | grep "React App"
+
+.deploy:
+  image:
+    name: amazon/aws-cli:2.17.20
+    entrypoint: [""]
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+  script:
+    - |
+      aws s3 sync build s3://$AWS_S3_BUCKET --delete
+      curl $CI_ENVIRONMENT_URL | grep "React App"
+      curl $CI_ENVIRONMENT_URL/version.html | grep "App Version: $APP_VERSION"
+
+pre_production:
+  stage: deploy_staging
+  environment:
+    name: Staging
+  extends: .deploy
+
+deploy_to_s3:
+  stage: deploy_production
+  when: manual
+  environment:
+    name: Production
+  extends: .deploy
